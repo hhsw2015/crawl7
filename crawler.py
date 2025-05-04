@@ -88,7 +88,7 @@ def init_csv():
 def configure_git_lfs():
     """Configure Git LFS tracking"""
     try:
-        subprocess.run(["git", "lfs", "track", csv_file], check=True)
+        subprocess.run(["git", "lfs", "track", csv_file], check=True, capture_output=True, text=True)
         logging.info(f"Configured Git LFS to track {csv_file}")
     except subprocess.CalledProcessError as e:
         logging.error(f"Error configuring Git LFS: {e.stderr}")
@@ -97,15 +97,27 @@ def configure_git_lfs():
 def git_commit(message):
     """Commit CSV file to Git repository"""
     try:
-        subprocess.run(["git", "add", csv_file], check=True)
+        # Configure Git user
+        subprocess.run(["git", "config", "user.name", "hhsw2015"], check=True, capture_output=True, text=True)
+        subprocess.run(["git", "config", "user.email", "hhsw2015@gmail.com"], check=True, capture_output=True, text=True)
+        logging.info("Configured Git user: hhsw2015 <hhsw2015@gmail.com>")
+
+        # Add CSV file
+        subprocess.run(["git", "add", csv_file], check=True, capture_output=True, text=True)
+        logging.info(f"Added {csv_file} to Git staging")
+
+        # Commit changes
         result = subprocess.run(["git", "commit", "-m", message], capture_output=True, text=True)
         if result.returncode == 0:
-            subprocess.run(["git", "push"], check=True)
-            logging.info(f"Git commit successful: {message}")
+            logging.info(f"Committed changes: {message}")
+            # Push to remote
+            push_result = subprocess.run(["git", "push"], check=True, capture_output=True, text=True)
+            logging.info(f"Git push successful: {message}")
         else:
             logging.warning(f"No changes to commit: {result.stderr}")
     except subprocess.CalledProcessError as e:
         logging.error(f"Git error: {e.stderr}")
+        raise
 
 def get_topic_id(url):
     """Extract topic ID from URL"""
