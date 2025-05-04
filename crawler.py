@@ -25,7 +25,7 @@ base_url = forum_url.rstrip('/') + '/'
 download_base_url = "https://files.cdntraffic.top/PL/torrent/files/"
 MAX_RETRIES = 3
 RETRY_DELAY = 0.5
-COMMIT_INTERVAL = 1000
+COMMIT_INTERVAL = 500
 TIMEOUT = 10
 MAX_WORKERS = 5
 
