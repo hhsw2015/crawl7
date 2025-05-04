@@ -76,15 +76,14 @@ retries = Retry(total=MAX_RETRIES, backoff_factor=RETRY_DELAY, status_forcelist=
 session.mount("https://", HTTPAdapter(max_retries=retries))
 
 def init_csv():
-    """Initialize CSV file if it doesn't exist"""
+    """Initialize CSV file only if it doesn't exist"""
     if not os.path.exists(csv_file):
         with open(csv_file, mode='w', newline='', encoding='utf-8') as file:
             writer = csv.writer(file)
             writer.writerow(["Page", "Title", "URL", "Publisher", "Link"])
         logging.info(f"Initialized new CSV file: {csv_file}")
-        configure_git_lfs()
     else:
-        logging.info(f"CSV file '{csv_file}' already exists")
+        logging.info(f"CSV file '{csv_file}' already exists, will append data")
 
 def configure_git_lfs():
     """Configure Git LFS tracking"""
@@ -129,6 +128,31 @@ def torrent_to_magnet(torrent_url):
     except Exception as e:
         logging.warning(f"Failed to convert {torrent_url} to magnet: {e}")
         return torrent_url  # Return torrent URL if conversion fails
+
+def get_max_page():
+    """Extract the maximum page number from the forum homepage"""
+    try:
+        logging.info(f"Fetching homepage to extract max page: {base_url}")
+        response = session.get(base_url, headers=page_headers, timeout=TIMEOUT)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        # Look for pagination links within #pagination
+        page_links = soup.select('#pagination a[href*="/page/"]')
+        max_page = 1
+        for link in page_links:
+            href = link.get('href', '')
+            match = re.search(r'/page/(\d+)/', href)
+            if match:
+                page_num = int(match.group(1))
+                max_page = max(max_page, page_num)
+        
+        logging.info(f"Extracted max page: {max_page}")
+        return max_page
+    except Exception as e:
+        logging.error(f"Failed to extract max page: {e}")
+        logging.warning("Defaulting to start_page=1")
+        return 1
 
 def crawl_page(page_number, retries=0):
     """Crawl a single page"""
@@ -191,7 +215,22 @@ def crawl_page(page_number, retries=0):
 
 def crawl_pages(start_page, end_page):
     """Main crawling logic"""
+    # Always configure Git LFS
+    configure_git_lfs()
+    
+    # Check if start_page is 0
+    if start_page == 0:
+        logging.info("start_page is 0, clearing CSV and extracting max page")
+        with open(csv_file, mode='w', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file)
+            writer.writerow(["Page", "Title", "URL", "Publisher", "Link"])
+        logging.info(f"Cleared CSV file: {csv_file}")
+        start_page = get_max_page()  # Extract max page from homepage
+        logging.info(f"Set start_page to {start_page}")
+    
+    # Initialize CSV if needed (won't clear if exists)
     init_csv()
+    
     total_records = 0
     pages = range(start_page, end_page - 1, -1)
     
