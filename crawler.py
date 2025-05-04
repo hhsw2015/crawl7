@@ -25,7 +25,7 @@ base_url = forum_url.rstrip('/') + '/'
 download_base_url = "https://files.cdntraffic.top/PL/torrent/files/"
 MAX_RETRIES = 3
 RETRY_DELAY = 0.5
-COMMIT_INTERVAL = 1000
+COMMIT_INTERVAL = 500
 TIMEOUT = 10
 MAX_WORKERS = 5
 
@@ -83,7 +83,10 @@ def init_csv():
             writer.writerow(["Page", "Title", "URL", "Publisher", "Link"])
         logging.info(f"Initialized new CSV file: {csv_file}")
     else:
-        logging.info(f"CSV file '{csv_file}' already exists, will append data")
+        file_size = os.path.getsize(csv_file)
+        with open(csv_file, 'r', encoding='utf-8') as file:
+            line_count = sum(1 for line in file)
+        logging.info(f"CSV file '{csv_file}' exists, size: {file_size} bytes, lines: {line_count}, will append data")
 
 def configure_git_lfs():
     """Configure Git LFS tracking"""
@@ -102,19 +105,25 @@ def git_commit(message):
         subprocess.run(["git", "config", "user.email", "hhsw2015@gmail.com"], check=True, capture_output=True, text=True)
         logging.info("Configured Git user: hhsw2015 <hhsw2015@gmail.com>")
 
+        # Check if CSV has changes
+        status_result = subprocess.run(["git", "status", "--porcelain", csv_file], capture_output=True, text=True)
+        if not status_result.stdout.strip():
+            logging.warning(f"No changes in {csv_file} to commit")
+            return
+
         # Add CSV file
         subprocess.run(["git", "add", csv_file], check=True, capture_output=True, text=True)
         logging.info(f"Added {csv_file} to Git staging")
 
         # Commit changes
-        result = subprocess.run(["git", "commit", "-m", message], capture_output=True, text=True)
+ counterparty = subprocess.run(["git", "commit", "-m", message], capture_output=True, text=True)
         if result.returncode == 0:
             logging.info(f"Committed changes: {message}")
             # Push to remote
-            push_result = subprocess.run(["git", "push"], check=True, capture_output=True, text=True)
+            push_result = subprocess.run(["git", "push", "origin", "main"], check=True, capture_output=True, text=True)
             logging.info(f"Git push successful: {message}")
         else:
-            logging.warning(f"No changes to commit: {result.stderr}")
+            logging.warning(f"Commit failed: {result.stderr}")
     except subprocess.CalledProcessError as e:
         logging.error(f"Git error: {e.stderr}")
         raise
@@ -182,7 +191,7 @@ def crawl_page(page_number, retries=0):
         soup = BeautifulSoup(response.text, 'html.parser')
         torrent_rows = soup.select('tr[id^="tr-"]')
         if not torrent_rows:
-            logging.warning(f"No torrent rows found on page {page_number}")
+            logging.warning(f"No torrent rows found on page {page_number}. Check selector 'tr[id^=\"tr-\"]' or page content.")
             return []
         
         results = []
@@ -264,10 +273,13 @@ def crawl_pages(start_page, end_page):
                                 writer.writerow([data["Page"], data["Title"], data["URL"], 
                                               data["Publisher"], data["Link"]])
                                 total_records += 1
-                        
-                        if total_records >= COMMIT_INTERVAL:
-                            git_commit(f"Update data for {total_records} records up to page {page_number}")
-                            total_records = 0
+                        logging.info(f"Wrote {len(results)} records to {csv_file} for page {page_number}")
+                    else:
+                        logging.warning(f"No data written for page {page_number}, results empty")
+                    
+                    if total_records >= COMMIT_INTERVAL:
+                        git_commit(f"Update data for {total_records} records up to page {page_number}")
+                        total_records = 0
                         
                 except Exception as e:
                     logging.error(f"Error processing page {page_number}: {e}")
@@ -276,6 +288,12 @@ def crawl_pages(start_page, end_page):
     
     if total_records > 0:
         git_commit(f"Final update for remaining {total_records} records")
+    
+    # Log final CSV status
+    file_size = os.path.getsize(csv_file)
+    with open(csv_file, 'r', encoding='utf-8') as file:
+        line_count = sum(1 for line in file)
+    logging.info(f"Final CSV status: {csv_file}, size: {file_size} bytes, lines: {line_count}")
 
 if __name__ == "__main__":
     # Initial request to establish session cookies
