@@ -98,35 +98,18 @@ def configure_git_lfs():
         raise
 
 def git_commit(message):
+    print("git_commit: " + message)
     """Commit CSV file to Git repository"""
     try:
-        # Configure Git user
-        subprocess.run(["git", "config", "user.name", "hhsw2015"], check=True, capture_output=True, text=True)
-        subprocess.run(["git", "config", "user.email", "hhsw2015@gmail.com"], check=True, capture_output=True, text=True)
-        logging.info("Configured Git user: hhsw2015 <hhsw2015@gmail.com>")
-
-        # Check if CSV has changes
-        status_result = subprocess.run(["git", "status", "--porcelain", csv_file], capture_output=True, text=True)
-        if not status_result.stdout.strip():
-            logging.warning(f"No changes in {csv_file} to commit")
-            return
-
-        # Add CSV file
-        subprocess.run(["git", "add", csv_file], check=True, capture_output=True, text=True)
-        logging.info(f"Added {csv_file} to Git staging")
-
-        # Commit changes
-        counterparty = subprocess.run(["git", "commit", "-m", message], capture_output=True, text=True)
+        subprocess.run(["git", "add", csv_file], check=True)
+        result = subprocess.run(["git", "commit", "-m", message], capture_output=True, text=True)
         if result.returncode == 0:
-            logging.info(f"Committed changes: {message}")
-            # Push to remote
-            push_result = subprocess.run(["git", "push", "origin", "main"], check=True, capture_output=True, text=True)
-            logging.info(f"Git push successful: {message}")
+            subprocess.run(["git", "push"], check=True)
+            print(f"Git commit successful: {message}")
         else:
-            logging.warning(f"Commit failed: {result.stderr}")
+            print(f"No changes to commit: {result.stderr}")
     except subprocess.CalledProcessError as e:
-        logging.error(f"Git error: {e.stderr}")
-        raise
+        print(f"Git error: {e.stderr}")
 
 def get_topic_id(url):
     """Extract topic ID from URL"""
@@ -273,16 +256,16 @@ def crawl_pages(start_page, end_page):
                                 writer.writerow([data["Page"], data["Title"], data["URL"], 
                                               data["Publisher"], data["Link"]])
                                 total_records += 1
-                        logging.info(f"Wrote {len(results)} records to {csv_file} for page {page_number}")
+                            print(f"Wrote {len(results)} records to {csv_file} for page {page_number}")
                     else:
-                        logging.warning(f"No data written for page {page_number}, results empty")
+                        print(f"No data written for page {page_number}, results empty")
                     
                     if total_records >= COMMIT_INTERVAL:
                         git_commit(f"Update data for {total_records} records up to page {page_number}")
                         total_records = 0
                         
                 except Exception as e:
-                    logging.error(f"Error processing page {page_number}: {e}")
+                    print(f"Error processing page {page_number}: {e}")
                 
                 time.sleep(random.uniform(0.5, 1.5))  # Delay between pages
     
