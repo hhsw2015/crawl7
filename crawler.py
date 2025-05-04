@@ -116,7 +116,7 @@ def git_commit(message):
         logging.info(f"Added {csv_file} to Git staging")
 
         # Commit changes
- counterparty = subprocess.run(["git", "commit", "-m", message], capture_output=True, text=True)
+        counterparty = subprocess.run(["git", "commit", "-m", message], capture_output=True, text=True)
         if result.returncode == 0:
             logging.info(f"Committed changes: {message}")
             # Push to remote
