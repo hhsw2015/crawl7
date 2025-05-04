@@ -7,6 +7,7 @@ import logging
 import time
 import random
 import re
+import hashlib
 from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
@@ -59,7 +60,7 @@ def init_csv():
     if not os.path.exists(csv_file):
         with open(csv_file, mode='w', newline='', encoding='utf-8') as file:
             writer = csv.writer(file)
-            writer.writerow(["Page", "Title", "URL", "Publisher", "Download_URL"])
+            writer.writerow(["Page", "Title", "URL", "Publisher", "Download_URL", "Magnet"])
         logging.info(f"Initialized new CSV file: {csv_file}")
         configure_git_lfs()
     else:
@@ -96,6 +97,19 @@ def get_download_url(topic_id):
     """Construct download URL"""
     return f"{download_base_url}{topic_id}.torrent" if topic_id else ""
 
+def torrent_to_magnet(torrent_url):
+    """Convert torrent URL to magnet link"""
+    try:
+        response = session.get(torrent_url, headers=headers, timeout=TIMEOUT)
+        response.raise_for_status()
+        torrent_content = response.content
+        info_hash = hashlib.sha1(torrent_content).hexdigest()
+        magnet = f"magnet:?xt=urn:btih:{info_hash}"
+        return magnet
+    except Exception as e:
+        logging.warning(f"Failed to convert {torrent_url} to magnet: {e}")
+        return torrent_url
+
 def crawl_page(page_number, retries=0):
     """Crawl a single page"""
     try:
@@ -126,6 +140,7 @@ def crawl_page(page_number, retries=0):
                 
                 topic_id = get_topic_id(topic_url)
                 download_url = get_download_url(topic_id)
+                magnet = torrent_to_magnet(download_url) if download_url else "N/A"
                 
                 publisher_elem = row.select_one('div.topicAuthor a.topicAuthor')
                 publisher = publisher_elem.get_text(strip=True) if publisher_elem else "Unknown"
@@ -136,6 +151,7 @@ def crawl_page(page_number, retries=0):
                     "URL": topic_url,
                     "Publisher": publisher,
                     "Download_URL": download_url,
+                    "Magnet": magnet,
                     "index": index
                 })
                 
@@ -155,7 +171,7 @@ def crawl_page(page_number, retries=0):
         logging.error(f"Failed to crawl page {page_number} after {MAX_RETRIES} attempts: {e}")
         return []
 
-def crawl_pages(start_page, puissante_page):
+def crawl_pages(start_page, end_page):
     """Main crawling logic"""
     init_csv()
     total_records = 0
@@ -180,7 +196,7 @@ def crawl_pages(start_page, puissante_page):
                         writer = csv.writer(file)
                         for data in results:
                             writer.writerow([data["Page"], data["Title"], data["URL"], 
-                                          data["Publisher"], data["Download_URL"]])
+                                          data["Publisher"], data["Download_URL"], data["Magnet"]])
                             total_records += 1
                     
                     if total_records >= COMMIT_INTERVAL:
