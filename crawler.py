@@ -81,6 +81,23 @@ session = requests.Session()
 retries = Retry(total=MAX_RETRIES, backoff_factor=RETRY_DELAY, status_forcelist=[500, 502, 503, 504])
 session.mount("https://", HTTPAdapter(max_retries=retries))
 
+def clean_title(title):
+    """清洗标题，仅保留英文部分"""
+    try:
+        # 使用正则表达式匹配英文字符、数字、标点和常见符号
+        # 匹配英文标题，允许包含括号、斜杠等
+        match = re.search(r'[A-Za-z0-9\s.,:;!?\'\"()/\-+&]*[A-Za-z0-9]+[A-Za-z0-9\s.,:;!?\'\"()/\-+&]*', title)
+        if match:
+            cleaned = match.group(0).strip()
+            if cleaned:
+                logging.debug(f"清洗标题: 原始='{title}', 清洗后='{cleaned}'")
+                return cleaned
+        logging.warning(f"标题无英文部分，保留原始: {title}")
+        return title
+    except Exception as e:
+        logging.error(f"清洗标题失败: {title}, 错误: {e}")
+        return title
+
 def init_csv():
     """初始化CSV文件，仅当文件不存在时创建"""
     try:
@@ -204,7 +221,9 @@ def crawl_page(page_number, retries=0):
                 if not title_elem:
                     logging.debug(f"页面 {page_number} 的行缺少标题元素，跳过")
                     continue
-                title = title_elem.get_text(strip=True)
+                raw_title = title_elem.get_text(strip=True)
+                title = clean_title(raw_title)  # 清洗标题
+                
                 topic_url = urljoin(base_url, title_elem['href'])
                 
                 topic_id = get_topic_id(topic_url)
@@ -258,7 +277,7 @@ def crawl_pages(start_page, end_page):
         init_csv()
         
         total_records = 0
-        pages = list(range(start_page, end_page - 1, -1))  # 转换为列表以确保顺序
+        pages = list(range(start_page, end_page - 1, -1))
         logging.debug(f"页面列表: {pages}")
         
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
