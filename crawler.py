@@ -19,8 +19,8 @@ logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('crawler_debug.log'),  # 保存日志到文件
-        logging.StreamHandler()  # 同时输出到控制台
+        logging.FileHandler('crawler_debug.log'),
+        logging.StreamHandler()
     ]
 )
 
@@ -32,7 +32,7 @@ base_url = forum_url.rstrip('/') + '/'
 download_base_url = "https://files.cdntraffic.top/PL/torrent/files/"
 MAX_RETRIES = 3
 RETRY_DELAY = 0.5
-COMMIT_INTERVAL = 500
+COMMIT_INTERVAL = 500  # 降低提交间隔以便测试
 TIMEOUT = 10
 MAX_WORKERS = 5
 
@@ -83,16 +83,20 @@ session.mount("https://", HTTPAdapter(max_retries=retries))
 
 def init_csv():
     """初始化CSV文件，仅当文件不存在时创建"""
-    if not os.path.exists(csv_file):
-        with open(csv_file, mode='w', newline='', encoding='utf-8') as file:
-            writer = csv.writer(file)
-            writer.writerow(["Page", "Title", "URL", "Publisher", "Link"])
-        logging.info(f"新建CSV文件: {csv_file}")
-    else:
-        file_size = os.path.getsize(csv_file)
-        with open(csv_file, 'r', encoding='utf-8') as file:
-            line_count = sum(1 for line in file)
-        logging.info(f"CSV文件已存在: {csv_file}, 大小: {file_size}字节, 行数: {line_count}")
+    try:
+        if not os.path.exists(csv_file):
+            with open(csv_file, mode='w', newline='', encoding='utf-8') as file:
+                writer = csv.writer(file)
+                writer.writerow(["Page", "Title", "URL", "Publisher", "Link"])
+            logging.info(f"新建CSV文件: {csv_file}")
+        else:
+            file_size = os.path.getsize(csv_file)
+            with open(csv_file, 'r', encoding='utf-8') as file:
+                line_count = sum(1 for line in file)
+            logging.info(f"CSV文件已存在: {csv_file}, 大小: {file_size}字节, 行数: {line_count}")
+    except Exception as e:
+        logging.error(f"初始化CSV文件失败: {e}")
+        raise
 
 def configure_git_lfs():
     """配置Git LFS跟踪"""
@@ -121,6 +125,7 @@ def git_commit(message):
             logging.warning(f"无更改需要提交: {result_commit.stderr}")
     except subprocess.CalledProcessError as e:
         logging.error(f"Git操作失败: {e.stderr}")
+        raise
 
 def get_topic_id(url):
     """从URL提取话题ID"""
@@ -177,7 +182,6 @@ def get_max_page():
 def crawl_page(page_number, retries=0):
     """爬取单页数据"""
     try:
-        # 构造页面URL
         if page_number == 1:
             url = base_url
         else:
@@ -240,10 +244,8 @@ def crawl_pages(start_page, end_page):
     """主爬取逻辑"""
     logging.info(f"开始爬取，从页面 {start_page} 到 {end_page}")
     try:
-        # 配置Git LFS
         configure_git_lfs()
         
-        # 处理start_page为0的情况
         if start_page == 0:
             logging.info("start_page为0，清空CSV并提取最大页数")
             with open(csv_file, mode='w', newline='', encoding='utf-8') as file:
@@ -253,25 +255,22 @@ def crawl_pages(start_page, end_page):
             start_page = get_max_page()
             logging.info(f"设置start_page为 {start_page}")
         
-        # 初始化CSV
         init_csv()
         
         total_records = 0
-        pages = range(start_page, end_page - 1, -1)
+        pages = list(range(start_page, end_page - 1, -1))  # 转换为列表以确保顺序
+        logging.debug(f"页面列表: {pages}")
         
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            # 提交所有页面爬取任务
             future_to_page = {executor.submit(crawl_page, page): page for page in pages}
             
-            # 按降序处理页面
-            pbar = tqdm(pages, desc="爬取页面")
-            for page_number in pbar:
-                future = future_to_page.get(page_number)
-                if future:
-                    try:
-                        results = future.result()
-                        logging.debug(f"页面 {page_number} 返回 {len(results)} 条记录")
-                        if results:
+            for future in tqdm(future_to_page, desc="爬取页面", total=len(pages)):
+                page_number = future_to_page[future]
+                try:
+                    results = future.result()
+                    logging.debug(f"页面 {page_number} 返回 {len(results)} 条记录")
+                    if results:
+                        try:
                             with open(csv_file, mode='a', newline='', encoding='utf-8') as file:
                                 writer = csv.writer(file)
                                 for data in results:
@@ -279,25 +278,28 @@ def crawl_pages(start_page, end_page):
                                                   data["Publisher"], data["Link"]])
                                     total_records += 1
                                 logging.info(f"页面 {page_number}: 写入 {len(results)} 条记录到 {csv_file}")
-                        else:
-                            logging.warning(f"页面 {page_number}: 无数据写入，记录为空")
-                        
-                        logging.debug(f"当前累计记录数: {total_records}")
-                        if total_records >= COMMIT_INTERVAL:
-                            logging.info(f"达到提交间隔 {COMMIT_INTERVAL}，提交记录")
-                            git_commit(f"更新 {total_records} 条记录至页面 {page_number}")
-                            total_records = 0
-                            
-                    except Exception as e:
-                        logging.error(f"处理页面 {page_number} 时出错: {e}")
+                        except Exception as e:
+                            logging.error(f"写入CSV失败，页面 {page_number}: {e}")
+                            continue
+                    else:
+                        logging.warning(f"页面 {page_number}: 无数据写入，记录为空")
                     
-                    time.sleep(random.uniform(0.5, 1.5))  # 页面间延迟
+                    logging.debug(f"当前累计记录数: {total_records}")
+                    if total_records >= COMMIT_INTERVAL:
+                        logging.info(f"达到提交间隔 {COMMIT_INTERVAL}，提交记录")
+                        git_commit(f"更新 {total_records} 条记录至页面 {page_number}")
+                        total_records = 0
+                            
+                except Exception as e:
+                    logging.error(f"处理页面 {page_number} 时出错: {e}")
+                    continue
+                
+                time.sleep(random.uniform(0.5, 1.5))
         
         if total_records > 0:
             logging.info(f"最后提交剩余 {total_records} 条记录")
             git_commit(f"最后更新剩余 {total_records} 条记录")
         
-        # 记录最终CSV状态
         file_size = os.path.getsize(csv_file)
         with open(csv_file, 'r', encoding='utf-8') as file:
             line_count = sum(1 for line in file)
@@ -312,7 +314,6 @@ def crawl_pages(start_page, end_page):
 if __name__ == "__main__":
     logging.info("脚本启动")
     try:
-        # 初始请求以建立会话
         session.get("https://pornotorrent.top/", headers=page_headers, timeout=TIMEOUT)
         logging.info("已初始化会话")
     except requests.RequestException as e:
