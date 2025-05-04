@@ -25,12 +25,12 @@ base_url = forum_url.rstrip('/') + '/'
 download_base_url = "https://files.cdntraffic.top/PL/torrent/files/"
 MAX_RETRIES = 3
 RETRY_DELAY = 0.5
-COMMIT_INTERVAL = 500
+COMMIT_INTERVAL = 1000
 TIMEOUT = 10
 MAX_WORKERS = 5
 
-# Headers to mimic a real browser
-headers = {
+# Headers for page requests
+page_headers = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
     "Accept-Encoding": "gzip, deflate, br, zstd",
@@ -50,6 +50,26 @@ headers = {
     "Referer": "https://pornotorrent.top/"
 }
 
+# Headers for torrent file requests
+torrent_headers = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br, zstd",
+    "Accept-Language": "en,zh-CN;q=0.9,zh;q=0.8",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Sec-Ch-Ua": '"Chromium";v="135", "Not-A.Brand";v="8"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"macOS"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "DNT": "1",
+    "Priority": "u=0, i"
+}
+
 # Configure requests session with retries
 session = requests.Session()
 retries = Retry(total=MAX_RETRIES, backoff_factor=RETRY_DELAY, status_forcelist=[500, 502, 503, 504])
@@ -60,7 +80,7 @@ def init_csv():
     if not os.path.exists(csv_file):
         with open(csv_file, mode='w', newline='', encoding='utf-8') as file:
             writer = csv.writer(file)
-            writer.writerow(["Page", "Title", "URL", "Publisher", "Download_URL", "Magnet"])
+            writer.writerow(["Page", "Title", "URL", "Publisher", "Link"])
         logging.info(f"Initialized new CSV file: {csv_file}")
         configure_git_lfs()
     else:
@@ -100,7 +120,7 @@ def get_download_url(topic_id):
 def torrent_to_magnet(torrent_url):
     """Convert torrent URL to magnet link"""
     try:
-        response = session.get(torrent_url, headers=headers, timeout=TIMEOUT)
+        response = session.get(torrent_url, headers=torrent_headers, timeout=TIMEOUT)
         response.raise_for_status()
         torrent_content = response.content
         info_hash = hashlib.sha1(torrent_content).hexdigest()
@@ -108,7 +128,7 @@ def torrent_to_magnet(torrent_url):
         return magnet
     except Exception as e:
         logging.warning(f"Failed to convert {torrent_url} to magnet: {e}")
-        return torrent_url
+        return torrent_url  # Return torrent URL instead of N/A
 
 def crawl_page(page_number, retries=0):
     """Crawl a single page"""
@@ -120,7 +140,7 @@ def crawl_page(page_number, retries=0):
             url = f"{base_url}page/{page_number}/"
         
         logging.info(f"Scraping page {page_number}: {url}")
-        response = session.get(url, headers=headers, timeout=TIMEOUT)
+        response = session.get(url, headers=page_headers, timeout=TIMEOUT)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -140,7 +160,7 @@ def crawl_page(page_number, retries=0):
                 
                 topic_id = get_topic_id(topic_url)
                 download_url = get_download_url(topic_id)
-                magnet = torrent_to_magnet(download_url) if download_url else "N/A"
+                link = torrent_to_magnet(download_url) if download_url else ""
                 
                 publisher_elem = row.select_one('div.topicAuthor a.topicAuthor')
                 publisher = publisher_elem.get_text(strip=True) if publisher_elem else "Unknown"
@@ -150,8 +170,7 @@ def crawl_page(page_number, retries=0):
                     "Title": title,
                     "URL": topic_url,
                     "Publisher": publisher,
-                    "Download_URL": download_url,
-                    "Magnet": magnet,
+                    "Link": link,
                     "index": index
                 })
                 
@@ -179,7 +198,7 @@ def crawl_pages(start_page, end_page):
     
     # Initial request to establish session cookies
     try:
-        session.get("https://pornotorrent.top/", headers=headers, timeout=TIMEOUT)
+        session.get("https://pornotorrent.top/", headers=page_headers, timeout=TIMEOUT)
         logging.info("Initialized session with homepage request")
     except requests.RequestException as e:
         logging.warning(f"Failed to initialize session: {e}")
@@ -196,7 +215,7 @@ def crawl_pages(start_page, end_page):
                         writer = csv.writer(file)
                         for data in results:
                             writer.writerow([data["Page"], data["Title"], data["URL"], 
-                                          data["Publisher"], data["Download_URL"], data["Magnet"]])
+                                          data["Publisher"], data["Link"]])
                             total_records += 1
                     
                     if total_records >= COMMIT_INTERVAL:
