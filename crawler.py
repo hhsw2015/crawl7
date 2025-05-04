@@ -128,7 +128,7 @@ def torrent_to_magnet(torrent_url):
         return magnet
     except Exception as e:
         logging.warning(f"Failed to convert {torrent_url} to magnet: {e}")
-        return torrent_url  # Return torrent URL instead of N/A
+        return torrent_url  # Return torrent URL if conversion fails
 
 def crawl_page(page_number, retries=0):
     """Crawl a single page"""
