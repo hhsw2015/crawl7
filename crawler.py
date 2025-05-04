@@ -9,7 +9,7 @@ import random
 import re
 import hashlib
 from urllib.parse import urljoin
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -150,7 +150,7 @@ def crawl_page(page_number, retries=0):
             return []
         
         results = []
-        for index, row in enumerate(torrent_rows):
+        for row in torrent_rows:
             try:
                 title_elem = row.select_one('a.torTopic.bold.tt-text')
                 if not title_elem:
@@ -170,8 +170,7 @@ def crawl_page(page_number, retries=0):
                     "Title": title,
                     "URL": topic_url,
                     "Publisher": publisher,
-                    "Link": link,
-                    "index": index
+                    "Link": link
                 })
                 
             except Exception as e:
@@ -194,8 +193,40 @@ def crawl_pages(start_page, end_page):
     """Main crawling logic"""
     init_csv()
     total_records = 0
-    pbar = tqdm(range(start_page, end_page - 1, -1), desc="Crawling pages")
+    pages = range(start_page, end_page - 1, -1)
     
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Submit all page crawling tasks
+        future_to_page = {executor.submit(crawl_page, page): page for page in pages}
+        
+        # Process pages in descending order to maintain sequence
+        pbar = tqdm(pages, desc="Crawling pages")
+        for page_number in pbar:
+            future = future_to_page.get(page_number)
+            if future:
+                try:
+                    results = future.result()
+                    if results:
+                        with open(csv_file, mode='a', newline='', encoding='utf-8') as file:
+                            writer = csv.writer(file)
+                            for data in results:
+                                writer.writerow([data["Page"], data["Title"], data["URL"], 
+                                              data["Publisher"], data["Link"]])
+                                total_records += 1
+                        
+                        if total_records >= COMMIT_INTERVAL:
+                            git_commit(f"Update data for {total_records} records up to page {page_number}")
+                            total_records = 0
+                        
+                except Exception as e:
+                    logging.error(f"Error processing page {page_number}: {e}")
+                
+                time.sleep(random.uniform(0.5, 1.5))  # Delay between pages
+    
+    if total_records > 0:
+        git_commit(f"Final update for remaining {total_records} records")
+
+if __name__ == "__main__":
     # Initial request to establish session cookies
     try:
         session.get("https://pornotorrent.top/", headers=page_headers, timeout=TIMEOUT)
@@ -203,34 +234,6 @@ def crawl_pages(start_page, end_page):
     except requests.RequestException as e:
         logging.warning(f"Failed to initialize session: {e}")
     
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        future_to_page = {executor.submit(crawl_page, page): page for page in pbar}
-        for future in as_completed(future_to_page):
-            page_number = future_to_page[future]
-            try:
-                results = future.result()
-                if results:
-                    results.sort(key=lambda x: x["index"])  # Ensure order by index
-                    with open(csv_file, mode='a', newline='', encoding='utf-8') as file:
-                        writer = csv.writer(file)
-                        for data in results:
-                            writer.writerow([data["Page"], data["Title"], data["URL"], 
-                                          data["Publisher"], data["Link"]])
-                            total_records += 1
-                    
-                    if total_records >= COMMIT_INTERVAL:
-                        git_commit(f"Update data for {total_records} records up to page {page_number}")
-                        total_records = 0
-                    
-            except Exception as e:
-                logging.error(f"Error processing page {page_number}: {e}")
-            
-            time.sleep(random.uniform(0.5, 1.5))  # Delay between pages
-    
-    if total_records > 0:
-        git_commit(f"Final update for remaining {total_records} records")
-
-if __name__ == "__main__":
     start_page = int(os.getenv("START_PAGE", 283))
     end_page = int(os.getenv("END_PAGE", 1))
     logging.info(f"Starting crawl from page {start_page} to {end_page} for forum {forum_id}")
