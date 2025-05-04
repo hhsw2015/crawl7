@@ -12,7 +12,7 @@ from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+from urllib3.util.retry importRetry
 
 # 配置日志记录，包含调试信息
 logging.basicConfig(
@@ -32,7 +32,7 @@ base_url = forum_url.rstrip('/') + '/'
 download_base_url = "https://files.cdntraffic.top/PL/torrent/files/"
 MAX_RETRIES = 3
 RETRY_DELAY = 0.5
-COMMIT_INTERVAL = 500  # 降低提交间隔以便测试
+COMMIT_INTERVAL = 500
 TIMEOUT = 10
 MAX_WORKERS = 5
 
@@ -82,17 +82,38 @@ retries = Retry(total=MAX_RETRIES, backoff_factor=RETRY_DELAY, status_forcelist=
 session.mount("https://", HTTPAdapter(max_retries=retries))
 
 def clean_title(title):
-    """清洗标题，仅保留英文部分"""
+    """清洗标题，仅保留英文部分，去除斜杠"""
     try:
-        # 使用正则表达式匹配英文字符、数字、标点和常见符号
-        # 匹配英文标题，允许包含括号、斜杠等
-        match = re.search(r'[A-Za-z0-9\s.,:;!?\'\"()/\-+&]*[A-Za-z0-9]+[A-Za-z0-9\s.,:;!?\'\"()/\-+&]*', title)
+        # 按斜杠分割标题，取第一个有效部分
+        parts = [part.strip() for part in title.split('/')]
+        logging.debug(f"标题分割: 原始='{title}', 分割后={parts}")
+        
+        # 优先选择包含字母的最长英文部分
+        valid_parts = []
+        for part in parts:
+            # 匹配包含字母、数字、空格、标点，但不包含斜杠
+            match = re.match(r'[A-Za-z0-9\s.,:;!?\'\"()\-+&]+$', part)
+            if match:
+                cleaned = match.group(0).strip()
+                if len(cleaned) > 3 or not re.match(r'^(ART|720p|1080p)$', cleaned):  # 排除短标签
+                    valid_parts.append(cleaned)
+        
+        if valid_parts:
+            # 选择最长的有效部分
+            cleaned = max(valid_parts, key=len)
+            logging.debug(f"清洗标题: 原始='{title}', 清洗后='{cleaned}'")
+            return cleaned
+        
+        # 如果没有有效英文部分，尝试提取所有英文字符
+        match = re.search(r'[A-Za-z0-9\s.,:;!?\'\"()\-+&]+', title)
         if match:
             cleaned = match.group(0).strip()
-            if cleaned:
-                logging.debug(f"清洗标题: 原始='{title}', 清洗后='{cleaned}'")
+            if len(cleaned) > 3 or not re.match(r'^(ART|720p|1080p)$', cleaned):
+                logging.debug(f"回退清洗: 原始='{title}', 清洗后='{cleaned}'")
                 return cleaned
-        logging.warning(f"标题无英文部分，保留原始: {title}")
+        
+        # 如果仍无效，保留原始标题并警告
+        logging.warning(f"标题无有效英文部分，保留原始: {title}")
         return title
     except Exception as e:
         logging.error(f"清洗标题失败: {title}, 错误: {e}")
@@ -222,7 +243,7 @@ def crawl_page(page_number, retries=0):
                     logging.debug(f"页面 {page_number} 的行缺少标题元素，跳过")
                     continue
                 raw_title = title_elem.get_text(strip=True)
-                title = clean_title(raw_title)  # 清洗标题
+                title = clean_title(raw_title)
                 
                 topic_url = urljoin(base_url, title_elem['href'])
                 
