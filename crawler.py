@@ -12,7 +12,7 @@ from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 from requests.adapters import HTTPAdapter
-from urllib3.util.retry importRetry
+from urllib3.util.retry import Retry
 
 # 配置日志记录，包含调试信息
 logging.basicConfig(
