@@ -27,6 +27,7 @@ def parse_filename(filename):
 # Sort files: group by base number, then by suffix (-1 for no suffix, then 0, 1, 2, ...)
 csv_files.sort(key=lambda f: parse_filename(f))
 
+magnet_pattern = r"magnet:\?xt=urn:btih:[a-zA-Z0-9]+"
 # Regex pattern for topic URLs
 topic_pattern = r"https://pornotorrent\.top/(\d+)-t\.html"
 
@@ -40,13 +41,16 @@ for filename in csv_files:
             for row in reader:
                 # Each row is a list of strings; join to process as a single string
                 line = " ".join(row)
-                # Check for topic URL
-                topic_matches = re.findall(topic_pattern, line)
-                for topic_id in topic_matches:
-                    # Construct torrent URL
-                    torrent_url = f"https://files.cdntraffic.top/PL/torrent/files/{topic_id}.torrent"
-                    torrent_list.append(torrent_url)
-                    file_torrent_count += 1
+
+                magnet_match = re.search(magnet_pattern, line)
+                if magnet_match:
+                    # Check for topic URL
+                    topic_matches = re.findall(topic_pattern, line)
+                    for topic_id in topic_matches:
+                        # Construct torrent URL
+                        torrent_url = f"https://files.cdntraffic.top/PL/torrent/files/{topic_id}.torrent"
+                        torrent_list.append(torrent_url)
+                        file_torrent_count += 1
         # Print counts for this file
         print(f"{filename}: {file_torrent_count} torrent links")
     except Exception as e:
